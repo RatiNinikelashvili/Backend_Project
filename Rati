@@ -1,0 +1,323 @@
+
+/==========================================================
+QUESTION 1 - SPRING BOOT REST API
+ყველაფერი ერთ ფაილში (მაგალითის სახით)
+==========================================================/
+
+// ======================= ENTITY =======================
+
+@Entity
+public class Cinema {
+
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+private Long id;
+
+@NotBlank
+private String name;
+
+@NotBlank
+private String address;
+
+@NotBlank
+private String city;
+
+private LocalDateTime createdAt = LocalDateTime.now();
+
+@OneToMany(mappedBy = "cinema", cascade = CascadeType.ALL)
+private List<Movie> movies = new ArrayList<>();
+}
+
+// Movie Entity-ში ემატება
+
+@ManyToOne
+@JoinColumn(name="cinema_id")
+private Cinema cinema;
+
+
+// ======================= REPOSITORY =======================
+
+@Repository
+public interface CinemaRepository extends JpaRepository<Cinema, Long> { }
+
+
+// ======================= SERVICE =======================
+
+@Service
+public class CinemaService {
+
+@Autowired
+private CinemaRepository repository;
+
+public Cinema create(Cinema cinema){
+return repository.save(cinema);
+}
+
+public Page<Cinema> getAll(int page,int size,String sort){
+return repository.findAll(PageRequest.of(page,size, Sort.by(sort)));
+}
+
+public Cinema getById(Long id){
+return repository.findById(id).orElseThrow();
+}
+
+public Cinema update(Long id,Cinema cinema){
+Cinema c=getById(id);
+
+c.setName(cinema.getName());
+c.setAddress(cinema.getAddress());
+c.setCity(cinema.getCity());
+
+return repository.save(c);
+}
+
+public void delete(Long id){
+repository.deleteById(id);
+}
+
+}
+
+
+// ======================= CONTROLLER =======================
+
+@RestController
+@RequestMapping("/cinemas")
+public class CinemaController {
+
+@Autowired
+private CinemaService service;
+
+@PostMapping
+@PreAuthorize("hasRole('ADMIN')")
+public ResponseEntity<Cinema> create(@Valid @RequestBody Cinema cinema){
+return new ResponseEntity<>(service.create(cinema),HttpStatus.CREATED);
+}
+
+@GetMapping
+@PreAuthorize("hasAnyRole('USER','ADMIN')")
+public Page<Cinema> getAll(
+@RequestParam(defaultValue="0") int page,
+@RequestParam(defaultValue="5") int size,
+@RequestParam(defaultValue="name") String sort){
+
+return service.getAll(page,size,sort);
+}
+
+@GetMapping("/{id}")
+@PreAuthorize("hasAnyRole('USER','ADMIN')")
+public Cinema getById(@PathVariable Long id){
+return service.getById(id);
+}
+
+@PutMapping("/{id}")
+@PreAuthorize("hasRole('ADMIN')")
+public Cinema update(@PathVariable Long id,@Valid @RequestBody Cinema cinema){
+return service.update(id,cinema);
+}
+
+@DeleteMapping("/{id}")
+@PreAuthorize("hasRole('ADMIN')")
+public ResponseEntity<?> delete(@PathVariable Long id){
+service.delete(id);
+return ResponseEntity.noContent().build();
+}
+
+}
+
+/*
+HTTP Status Codes
+
+POST -> 201 CREATED
+GET -> 200 OK
+PUT -> 200 OK
+DELETE -> 204 NO CONTENT
+Validation -> @Valid
+Security ->
+POST PUT DELETE -> ADMIN
+GET -> USER, ADMIN
+Pagination -> PageRequest
+Sorting -> name / createdAt
+*/
+
+
+/==========================================================
+QUESTION 2 - MongoDB Query
+==========================================================/
+
+db.employees.find(
+{
+salary:{$gte:3000},
+age:{$lt:40}
+})
+.sort({salary:-1})
+.limit(5);
+
+
+/==========================================================
+QUESTION 3 - MongoDB Aggregation
+==========================================================/
+
+db.employees.aggregate([
+{
+$group:{
+_id:"$department",
+employeesCount:{$sum:1},
+averageSalary:{$avg:"$salary"},
+maxSalary:{$max:"$salary"},
+minSalary:{$min:"$salary"}
+}
+}
+]);
+
+
+/==========================================================
+QUESTION 4 - MongoDB Aggregation
+==========================================================/
+
+db.students.aggregate([
+{
+$sort:{gpa:-1}
+},
+{
+$group:{
+_id:"$faculty",
+studentsCount:{$sum:1},
+averageGPA:{$avg:"$gpa"},
+topStudent:{$first:"$$ROOT"}
+}
+}
+]);
+
+
+/==========================================================
+QUESTION 5 - Express + Mongoose
+==========================================================/
+
+// ======================= MODEL =======================
+
+const mongoose=require("mongoose");
+
+const CourseSchema=new mongoose.Schema({
+
+title:{
+type:String,
+required:true
+},
+
+description:String,
+
+duration:Number,
+
+price:Number,
+
+createdAt:{
+type:Date,
+default:Date.now
+}
+
+});
+
+const Course=mongoose.model("Course",CourseSchema);
+
+
+// ======================= CRUD =======================
+
+// CREATE
+app.post("/courses",auth,admin,async(req,res)=>{
+const course=await Course.create(req.body);
+res.status(201).json(course);
+});
+
+// GET ALL (Search + Pagination + Sorting)
+app.get("/courses",auth,async(req,res)=>{
+
+const page=req.query.page||1;
+const limit=req.query.limit||5;
+const search=req.query.search||"";
+const sort=req.query.sort||"createdAt";
+
+const courses=await Course.find({
+title:{$regex:search,$options:"i"}
+})
+.sort(sort)
+.skip((page-1)*limit)
+.limit(limit);
+
+res.json(courses);
+});
+
+// GET BY ID
+app.get("/courses/:id",auth,async(req,res)=>{
+res.json(await Course.findById(req.params.id));
+});
+
+// UPDATE
+app.put("/courses/:id",auth,admin,async(req,res)=>{
+const course=await Course.findByIdAndUpdate(
+req.params.id,
+req.body,
+{new:true}
+);
+res.json(course);
+});
+
+// DELETE
+app.delete("/courses/:id",auth,admin,async(req,res)=>{
+await Course.findByIdAndDelete(req.params.id);
+res.send("Deleted");
+});
+
+
+// ======================= ROUTES =======================
+
+router.post("/courses",auth,admin);
+router.get("/courses",auth);
+router.get("/courses/:id",auth);
+router.put("/courses/:id",auth,admin);
+router.delete("/courses/:id",auth,admin);
+
+
+// ======================= AUTH MIDDLEWARE =======================
+
+function auth(req,res,next){
+next();
+}
+
+function admin(req,res,next){
+
+if(req.user.role==="ADMIN"){
+next();
+}
+
+else{
+res.status(403).send("Forbidden");
+}
+
+}
+
+/*
+Permissions
+
+POST -> ADMIN
+PUT -> ADMIN
+DELETE -> ADMIN
+GET -> USER, ADMIN
+
+Features
+
+✔ Mongoose Schema
+✔ CRUD
+✔ Search(title)
+✔ Pagination
+✔ Sorting(price, createdAt)
+✔ Routes
+✔ Authentication Middleware
+✔ Role Permissions
+*/
+
+Disclaimer
+This email and attachments (if any), is for the exclusive and confidential use of the addressee(s) and may contain legally privileged information. Any other distribution, use or reproduction without the sender’s prior consent is unauthorized and strictly prohibited. If you have received this message in error, please notify the sender by email immediately and delete this message from your computer.
+
+IBSU accepts no liability for the content of this email, or for the consequences of any actions taken on the basis of the information provided, unless that information is subsequently confirmed in writing.
+
+  
